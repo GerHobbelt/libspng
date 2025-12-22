@@ -18,7 +18,7 @@
     #ifdef SPNG_USE_MINIZ
         #include <miniz.h>
     #else
-        #include <zlib.h>
+        #include <zlib-ng.h>
     #endif
 #endif
 
@@ -338,7 +338,7 @@ struct spng_ctx
 
     struct spng_subimage subimage[7];
 
-    z_stream zstream;
+    zng_stream zstream;
     unsigned char *scanline_buf, *prev_scanline_buf, *row_buf, *filtered_scanline_buf;
     unsigned char *scanline, *prev_scanline, *row, *filtered_scanline;
 
@@ -893,8 +893,8 @@ static int write_header(spng_ctx *ctx, const uint8_t chunk_type[4], size_t chunk
     int ret = require_bytes(ctx, total);
     if(ret) return ret;
 
-    uint32_t crc = crc32(0, NULL, 0);
-    ctx->current_chunk.crc = crc32(crc, chunk_type, 4);
+    uint32_t crc = zng_crc32(0, NULL, 0);
+    ctx->current_chunk.crc = zng_crc32(crc, chunk_type, 4);
 
     memcpy(&ctx->current_chunk.type, chunk_type, 4);
     ctx->current_chunk.length = (uint32_t)chunk_length;
@@ -940,7 +940,7 @@ static int finish_chunk(spng_ctx *ctx)
     write_u32(header, chunk->length);
     memcpy(header + 4, chunk->type, 4);
 
-    chunk->crc = crc32(chunk->crc, chunk_data, chunk->length);
+    chunk->crc = zng_crc32(chunk->crc, chunk_data, chunk->length);
 
     write_u32(chunk_data + chunk->length, chunk->crc);
 
@@ -1085,8 +1085,8 @@ static inline int read_header(spng_ctx *ctx)
 
     if(!ctx->skip_crc)
     {
-        ctx->cur_actual_crc = crc32(0, NULL, 0);
-        ctx->cur_actual_crc = crc32(ctx->cur_actual_crc, chunk.type, 4);
+        ctx->cur_actual_crc = zng_crc32(0, NULL, 0);
+        ctx->cur_actual_crc = zng_crc32(ctx->cur_actual_crc, chunk.type, 4);
     }
 
     ctx->current_chunk = chunk;
@@ -1106,7 +1106,7 @@ static int read_chunk_bytes(spng_ctx *ctx, uint32_t bytes)
     ret = read_data(ctx, bytes);
     if(ret) return ret;
 
-    if(!ctx->skip_crc) ctx->cur_actual_crc = crc32(ctx->cur_actual_crc, ctx->data, bytes);
+    if(!ctx->skip_crc) ctx->cur_actual_crc = zng_crc32(ctx->cur_actual_crc, ctx->data, bytes);
 
     ctx->cur_chunk_bytes_left -= bytes;
 
@@ -1137,7 +1137,7 @@ static int read_chunk_bytes2(spng_ctx *ctx, void *out, uint32_t bytes)
         ctx->bytes_read += len;
         if(ctx->bytes_read < len) return SPNG_EOVERFLOW;
 
-        if(!ctx->skip_crc) ctx->cur_actual_crc = crc32(ctx->cur_actual_crc, out, len);
+        if(!ctx->skip_crc) ctx->cur_actual_crc = zng_crc32(ctx->cur_actual_crc, out, len);
 
         ctx->cur_chunk_bytes_left -= len;
 
@@ -1181,7 +1181,7 @@ static int discard_chunk_bytes(spng_ctx *ctx, uint32_t bytes)
 
 static int spng__inflate_init(spng_ctx *ctx, int window_bits)
 {
-    if(ctx->zstream.state) inflateEnd(&ctx->zstream);
+    if(ctx->zstream.state) zng_inflateEnd(&ctx->zstream);
 
     ctx->inflate = 1;
 
@@ -1189,7 +1189,7 @@ static int spng__inflate_init(spng_ctx *ctx, int window_bits)
     ctx->zstream.zfree = spng__zfree;
     ctx->zstream.opaque = ctx;
 
-    if(inflateInit2(&ctx->zstream, window_bits) != Z_OK) return SPNG_EZLIB_INIT;
+    if(zng_inflateInit2(&ctx->zstream, window_bits) != Z_OK) return SPNG_EZLIB_INIT;
 
 #if ZLIB_VERNUM >= 0x1290 && !defined(SPNG_USE_MINIZ)
 
@@ -1217,17 +1217,17 @@ static int spng__inflate_init(spng_ctx *ctx, int window_bits)
 
 static int spng__deflate_init(spng_ctx *ctx, struct spng__zlib_options *options)
 {
-    if(ctx->zstream.state) deflateEnd(&ctx->zstream);
+    if(ctx->zstream.state) zng_deflateEnd(&ctx->zstream);
 
     ctx->deflate = 1;
 
-    z_stream *zstream = &ctx->zstream;
+    zng_stream *zstream = &ctx->zstream;
     zstream->zalloc = spng__zalloc;
     zstream->zfree = spng__zfree;
     zstream->opaque = ctx;
     zstream->data_type = options->data_type;
 
-    int ret = deflateInit2(zstream, options->compression_level, Z_DEFLATED, options->window_bits, options->mem_level, options->strategy);
+    int ret = zng_deflateInit2(zstream, options->compression_level, Z_DEFLATED, options->window_bits, options->mem_level, options->strategy);
 
     if(ret != Z_OK) return SPNG_EZLIB_INIT;
 
@@ -1259,7 +1259,7 @@ static int spng__inflate_stream(spng_ctx *ctx, char **out, size_t *len, size_t e
 
     if(buf == NULL) return SPNG_EMEM;
 
-    z_stream *stream = &ctx->zstream;
+    zng_stream *stream = &ctx->zstream;
 
     if(start_buf != NULL && start_len)
     {
@@ -1277,7 +1277,7 @@ static int spng__inflate_stream(spng_ctx *ctx, char **out, size_t *len, size_t e
 
     while(ret != Z_STREAM_END)
     {
-        ret = inflate(stream, Z_NO_FLUSH);
+        ret = zng_inflate(stream, Z_NO_FLUSH);
 
         if(ret == Z_STREAM_END) break;
 
@@ -1393,14 +1393,14 @@ static int read_scanline_bytes(spng_ctx *ctx, unsigned char *dest, size_t len)
     int ret = Z_OK;
     uint32_t bytes_read;
 
-    z_stream *zstream = &ctx->zstream;
+    zng_stream *zstream = &ctx->zstream;
 
     zstream->avail_out = (uInt)len;
     zstream->next_out = dest;
 
     while(zstream->avail_out != 0)
     {
-        ret = inflate(zstream, Z_NO_FLUSH);
+        ret = zng_inflate(zstream, Z_NO_FLUSH);
 
         if(ret == Z_OK) continue;
 
@@ -2285,8 +2285,8 @@ static int read_ihdr(spng_ctx *ctx)
     if(chunk->length != 13) return SPNG_EIHDR_SIZE;
     if(memcmp(chunk->type, type_ihdr, 4)) return SPNG_ENOIHDR;
 
-    ctx->cur_actual_crc = crc32(0, NULL, 0);
-    ctx->cur_actual_crc = crc32(ctx->cur_actual_crc, data + 12, 17);
+    ctx->cur_actual_crc = zng_crc32(0, NULL, 0);
+    ctx->cur_actual_crc = zng_crc32(ctx->cur_actual_crc, data + 12, 17);
 
     ctx->ihdr.width = read_u32(data + 16);
     ctx->ihdr.height = read_u32(data + 20);
@@ -4068,12 +4068,12 @@ static int write_chunks_before_idat(spng_ctx *ctx)
 
     if(ctx->stored.iccp)
     {
-        uLongf dest_len = compressBound((uLong)ctx->iccp.profile_len);
+        size_t dest_len = zng_compressBound(ctx->iccp.profile_len);
 
         Bytef *buf = spng__malloc(ctx, dest_len);
         if(buf == NULL) return SPNG_EMEM;
 
-        ret = compress2(buf, &dest_len, (void*)ctx->iccp.profile, (uLong)ctx->iccp.profile_len, Z_DEFAULT_COMPRESSION);
+        ret = zng_compress2(buf, &dest_len, (void*)ctx->iccp.profile, ctx->iccp.profile_len, Z_DEFAULT_COMPRESSION);
 
         if(ret != Z_OK)
         {
@@ -4379,8 +4379,8 @@ static int write_chunks_before_idat(spng_ctx *ctx)
                 ret = spng__deflate_init(ctx, &ctx->text_options);
                 if(ret) return ret;
 
-                z_stream *zstream = &ctx->zstream;
-                uLongf dest_len = deflateBound(zstream, (uLong)text_length);
+				zng_stream *zstream = &ctx->zstream;
+                uLongf dest_len = zng_deflateBound(zstream, (uLong)text_length);
 
                 compressed_text = spng__malloc(ctx, dest_len);
 
@@ -4392,7 +4392,7 @@ static int write_chunks_before_idat(spng_ctx *ctx)
                 zstream->next_out = compressed_text;
                 zstream->avail_out = dest_len;
 
-                ret = deflate(zstream, Z_FINISH);
+                ret = zng_deflate(zstream, Z_FINISH);
 
                 if(ret != Z_STREAM_END)
                 {
@@ -4491,7 +4491,7 @@ static int write_idat_bytes(spng_ctx *ctx, const void *scanline, size_t len, int
 
     int ret = 0;
     unsigned char *data = NULL;
-    z_stream *zstream = &ctx->zstream;
+	zng_stream *zstream = &ctx->zstream;
     uint32_t idat_length = SPNG_WRITE_SIZE;
 
     zstream->next_in = scanline;
@@ -4499,7 +4499,7 @@ static int write_idat_bytes(spng_ctx *ctx, const void *scanline, size_t len, int
 
     do
     {
-        ret = deflate(zstream, flush);
+        ret = zng_deflate(zstream, flush);
 
         if(zstream->avail_out == 0)
         {
@@ -4524,12 +4524,12 @@ static int finish_idat(spng_ctx *ctx)
 {
     int ret = 0;
     unsigned char *data = NULL;
-    z_stream *zstream = &ctx->zstream;
+	zng_stream *zstream = &ctx->zstream;
     uint32_t idat_length = SPNG_WRITE_SIZE;
 
     while(ret != Z_STREAM_END)
     {
-        ret = deflate(zstream, Z_FINISH);
+        ret = zng_deflate(zstream, Z_FINISH);
 
         if(ret)
         {
@@ -4827,7 +4827,7 @@ int spng_encode_image(spng_ctx *ctx, const void *img, size_t len, int fmt, int f
 
     ctx->fmt = fmt;
 
-    z_stream *zstream = &ctx->zstream;
+	zng_stream *zstream = &ctx->zstream;
     zstream->avail_out = SPNG_WRITE_SIZE;
 
     ret = write_header(ctx, type_idat, zstream->avail_out, &zstream->next_out);
@@ -4988,8 +4988,10 @@ void spng_ctx_free(spng_ctx *ctx)
         spng__free(ctx, ctx->chunk_list);
     }
 
-    if(ctx->deflate) deflateEnd(&ctx->zstream);
-    else inflateEnd(&ctx->zstream);
+    if(ctx->deflate)
+		zng_deflateEnd(&ctx->zstream);
+    else
+		zng_inflateEnd(&ctx->zstream);
 
     if(!ctx->user_owns_out_png) spng__free(ctx, ctx->out_png);
 
