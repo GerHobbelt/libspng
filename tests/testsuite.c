@@ -1118,7 +1118,7 @@ cleanup:
 
 static int spngt_run_test(const char *filename, struct spngt_test_case *test_case)
 {
-    enum spng_errno ret;
+    int ret;
     size_t file_length = 0;
     struct spngt_test_case spng = *test_case;
     struct spngt_test_case libpng = *test_case;
@@ -1412,7 +1412,7 @@ static int stream_write_checked(spng_ctx *ctx, void *user, void *data, size_t le
 static int extended_tests(FILE *file, int fmt)
 {
     uint32_t i;
-    enum spng_errno ret = 0;
+    int ret = 0;
     unsigned char *image = NULL;
     unsigned char *encoded = NULL;
     spng_ctx *enc = NULL;
